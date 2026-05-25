@@ -1,4 +1,3 @@
-python
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -146,4 +145,3 @@ else:
     st.header("🗺️ แผนที่พิกัดสถานีชาร์จ EV")
     map_url = "https://www.google.com/maps/d/u/0/embed?mid=12ieBRQK2FUYgCjGt-VehLjKEufqTn4"
     components.iframe(map_url, width=800, height=500)
-
