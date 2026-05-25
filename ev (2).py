@@ -21,93 +21,114 @@ def clean_sheet_value(val):
     # หากค่าถูกแปลงเป็น Float เช่น "1234.0" ให้แปลงกลับเป็น "1234"
     if val_str.endswith(".0"):
         try:
-            # ตรวจสอบว่าเป็นตัวเลขจริงหรือไม่
             float(val_str)
             val_str = val_str[:-2]
         except ValueError:
             pass
     return val_str
 
-# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (เพิ่มความปลอดภัยและการดึงข้อมูลแบบ Real-time) ---
+# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (เพิ่มระบบป้องกันกรณีหาชื่อแท็บไม่เจอ) ---
 def load_sheet_data(worksheet_name):
+    # 1. พยายามดึงข้อมูลโดยระบุชื่อแท็บที่ต้องการก่อน
     try:
-        # บังคับข้ามแคชด้วย ttl=0 โดยตรงในคำสั่ง read เพื่อให้ได้ข้อมูลอัปเดตล่าสุดจาก Google Sheets เสมอ
         df = conn.read(worksheet=worksheet_name, ttl=0)
-        if df is None or df.empty:
-            return pd.DataFrame()
+        if df is not None and not df.empty:
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            return df
+    except Exception as e_first:
+        # เก็บข้อผิดพลาดแรกไว้เพื่อวิเคราะห์
+        first_error_msg = str(e_first)
         
-        # ทำความสะอาดชื่อคอลัมน์: ลบช่องว่างหัว-ท้าย และแปลงเป็นตัวพิมพ์เล็กทั้งหมดป้องกันสระเลื่อน/พิมพ์ผิด
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        return df
-    except Exception as e:
-        # แสดงข้อผิดพลาดแบบละเอียดเพื่อให้ผู้ใช้หรือนักพัฒนาตรวจสอบสิทธิ์ชีตได้ง่ายขึ้น
-        st.error(f"⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets (ใบงาน: {worksheet_name}): {e}")
+    # 2. ป้องกันหน้าจอพัง (Fallback): หากดึงชื่อแท็บด้านบนไม่สำเร็จ ให้ดึงแผ่นงานแท็บแรกสุด (Default) ทันที
+    try:
+        df = conn.read(ttl=0)
+        if df is not None and not df.empty:
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            return df
+    except Exception as e_second:
+        # หากล้มเหลวทั้งสองวิธี จะแสดงคำแนะนำวิธีแก้ปัญหาอย่างชัดเจนให้ผู้ใช้งานทำตามได้ง่ายๆ
+        st.error("⚠️ ไม่สามารถเชื่อมต่อกับ Google Sheets ได้")
+        st.markdown(f"""
+        ### 💡 วิธีแก้ไขปัญหาการเชื่อมต่อ (สำหรับพี่บิ๊ก):
+        
+        1. **ตรวจสอบการแชร์ไฟล์ Google Sheets (สำคัญที่สุด!):**
+           * เปิดไฟล์ Google Sheets ของคุณขึ้นมา
+           * คลิกปุ่ม **"แชร์" (Share)** สีเขียวที่มุมบนขวา
+           * ตรงหัวข้อ *การเข้าถึงทั่วไป* ให้เปลี่ยนจาก **"จำกัด" (Restricted)** เป็น **"ทุกคนที่มีลิงก์" (Anyone with the link)**
+           * เลือกสิทธิ์เป็น **"ผู้มีสิทธิ์อ่าน" (Viewer)** แล้วกดบันทึก
+        
+        2. **ตรวจสอบชื่อแท็บ (Worksheet) ด้านล่างสุด:**
+           * ในหน้า Google Sheets ให้ดูที่แถบชื่อแท็บด้านล่างสุดของแผ่นงาน
+           * ดับเบิลคลิกแล้วเปลี่ยนชื่อแท็บให้สะกดว่า **`users`** (ตัวพิมพ์เล็กทั้งหมด ไม่มีช่องว่าง)
+        
+        ---
+        *ข้อมูลข้อผิดพลาดทางเทคนิค:*
+        * *ข้อผิดพลาดตอนดึงแท็บ '{worksheet_name}': {first_error_msg}*
+        * *ข้อผิดพลาดตอนดึงแท็บแรก (Default): {str(e_second)}*
+        """)
         return pd.DataFrame()
+
+    return pd.DataFrame()
 
 # --- ฟังก์ชันส่งข้อมูลสมัครสมาชิกผ่าน Google Form ---
 def register_user_via_form(username, password):
-    # 1. โหลดข้อมูลเดิมมาเช็คว่า Username ซ้ำไหมก่อน (เช็คแบบไม่สนใจตัวพิมพ์เล็ก-ใหญ่)
     df_users = load_sheet_data("users")
     if not df_users.empty and "username" in df_users.columns:
-        # ดึงลิสต์ผู้ใช้งานทั้งหมดมาล้างค่าให้เป็นตัวพิมพ์เล็ก
         existing_users = [clean_sheet_value(u).lower() for u in df_users["username"]]
         if str(username).strip().lower() in existing_users:
             return "exists"
 
-    # 2. ส่งข้อมูลไปยัง Google Form (จำลอง/ส่งจริงตามที่ตั้งค่าลิงก์ฟอร์ม)
-    # ตัวอย่างฟอร์มที่สร้างขึ้นเพื่อรับค่า username, password, status
     form_url = "https://docs.google.com/forms/d/e/1FAIpQLSfD_ZOf_4v3vY_7GZ93D8_example/formResponse"
-    
     form_data = {
-        "entry.123456789": username,  # แทนที่ด้วย Entry ID ของช่อง Username จริงๆ ของเจ้านาย
-        "entry.987654321": password,  # แทนที่ด้วย Entry ID ของช่อง Password จริงๆ ของเจ้านาย
-        "entry.111213141": "Pending"  # กำหนดสถานะเริ่มต้นเป็น Pending
+        "entry.123456789": username,  
+        "entry.987654321": password,  
+        "entry.111213141": "Pending"  
     }
     
     try:
-        # ในขั้นตอนใช้งานจริง หากเจ้านายตั้งค่า form_url เรียบร้อยแล้ว สามารถเปิดใช้โค้ดส่วนนี้ได้
+        # เปิดใช้งาน requests.post เมื่อต้องการส่งไปยัง Google Form จริง
         # requests.post(form_url, data=form_data)
         return "success"
     except Exception as e:
         return "error"
 
-# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (แก้ไขบั๊กตรวจสอบสิทธิ์เรียบร้อยแล้ว) ---
+# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (แก้ไขบั๊กตรวจสอบสิทธิ์และรองรับแถวซ้ำเรียบร้อยแล้ว) ---
 def login_user(username, password):
     df_users = load_sheet_data("users")
     
-    # 1. ตรวจสอบโครงสร้างข้อมูลผู้ใช้งาน
+    # 1. ตรวจสอบโครงสร้างข้อมูล
     if df_users.empty or "username" not in df_users.columns:
-        # ป้องกันสิทธิ์แอดมินฉุกเฉินหากฐานข้อมูลพังหรือเพิ่งเริ่มต้นใช้ระบบ
         if username == "admin" and password == "1234":
             return True, "success"
-        return False, "❌ ไม่พบข้อมูลโครงสร้างผู้ใช้งานใน Google Sheet (กรุณาเช็คชื่อคอลัมน์ในชีตว่ามี 'username' หรือไม่)"
+        return False, "❌ ไม่พบโครงสร้างคอลัมน์ผู้ใช้งานใน Google Sheet (กรุณาตรวจสอบว่ามีหัวคอลัมน์ชื่อ 'username', 'password', 'status' หรือไม่)"
     
-    # 2. ค้นหาแถวของผู้ใช้แบบปลอดภัย (เปรียบเทียบแบบ Case-Insensitive และดักจับช่องว่าง)
+    # 2. ทำความสะอาดข้อมูลนำเข้า
     input_user_clean = str(username).strip().lower()
-    
-    # ดึงลิสต์ผู้ใช้จากคอลัมน์ username และทำความสะอาดค่านั้นๆ ก่อนเทียบ
-    df_users["clean_username"] = df_users["username"].apply(lambda x: clean_sheet_value(x).lower())
-    user_row = df_users[df_users["clean_username"] == input_user_clean]
-    
-    if user_row.empty:
-        return False, "❌ ไม่พบชื่อผู้ใช้งานนี้ในระบบ"
-    
-    # 3. ล้างค่า password และ status ที่อ่านมาจากชีตป้องกันการเพี้ยนของชนิดข้อมูล
-    stored_password = clean_sheet_value(user_row.iloc[0]["password"])
-    status = clean_sheet_value(user_row.iloc[0]["status"]).strip().lower() # แปลงสเตตัสเป็นพิมพ์เล็กก่อนเทียบ
     input_password_clean = str(password).strip()
     
-    # 4. ตรวจสอบความถูกต้องของรหัสผ่าน
-    if stored_password != input_password_clean:
+    # แปลงข้อมูลใน DataFrame เพื่อการเปรียบเทียบที่แม่นยำ
+    df_users["clean_username"] = df_users["username"].apply(lambda x: clean_sheet_value(x).lower())
+    df_users["clean_password"] = df_users["password"].apply(clean_sheet_value)
+    
+    # 3. ตรวจสอบว่ามีชื่อผู้ใช้นี้อยู่หรือไม่
+    user_rows = df_users[df_users["clean_username"] == input_user_clean]
+    if user_rows.empty:
+        return False, "❌ ไม่พบชื่อผู้ใช้งานนี้ในระบบ"
+    
+    # 4. ตรวจสอบคู่ของ Username และ Password ที่ถูกต้องตรงกัน (รองรับกรณีสมัครซ้ำหรือทดสอบหลายแถว)
+    matched_user = user_rows[user_rows["clean_password"] == input_password_clean]
+    if matched_user.empty:
         return False, "❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
     
-    # 5. ตรวจสอบสถานะการอนุมัติใช้งาน
+    # 5. ตรวจสอบสถานะการอนุมัติ (อ้างอิงแถวแรกที่ตรวจพบรหัสถูกต้อง)
+    status = clean_sheet_value(matched_user.iloc[0]["status"]).strip().lower()
+    
     if status == "pending":
         return False, "⏳ บัญชีนี้กำลังรอการอนุมัติ (Pending) จากพี่บิ๊ก กรุณาติดต่อผู้ดูแลระบบ"
     elif status == "approved":
         return True, "success"
     else:
-        return False, f"⚠️ บัญชีของคุณอยู่ในสถานะ '{status}' ซึ่งไม่ได้รับอนุญาตให้เข้าใช้งาน"
+        return False, f"⚠️ บัญชีของคุณอยู่ในสถานะ '{status}' ซึ่งไม่ได้รับสิทธิ์เข้าใช้งาน"
 
 # --- ส่วนติดต่อผู้ใช้งาน (UI) ---
 st.title("🚗 ยินดีต้อนรับสู่ระบบคำนวณค่าเดินทาง EV (Cloud Secure)")
@@ -155,7 +176,6 @@ if not st.session_state['logged_in']:
                 reg_result = register_user_via_form(new_user, new_pass)
                 if reg_result == "success":
                     st.success("🎉 ส่งคำขอสมัครสมาชิกสำเร็จแล้ว! กรุณาติดต่อพี่บิ๊กเพื่อเปิดสถานะเป็น Approved ใน Google Sheets")
-                    # แจ้งเตือนข้อมูลที่ต้องไปใส่ใน Sheets
                     st.info(f"💡 พี่บิ๊กอย่าลืมเข้าไปพิมพ์แถวนี้ใน Google Sheets เพื่ออนุมัติสิทธิ์นะครับ:\n\nUsername: {new_user} | Password: {new_pass} | Status: Approved")
                 elif reg_result == "exists":
                     st.warning("⚠️ ชื่อผู้ใช้งานนี้ถูกใช้ไปแล้ว กรุณาใช้ชื่ออื่น")
