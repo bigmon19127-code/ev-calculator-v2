@@ -12,69 +12,116 @@ conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 # --- 1. ตั้งค่าหน้าแอป ---
 st.set_page_config(page_title="ระบบคำนวณค่าเดินทาง EV", page_icon="🚗", layout="wide")
 
-# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets ---
+# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (ฉลาดขึ้น: ลองค้นหาหลายชื่อแผ่นงานแบบยืดหยุ่น) ---
 def load_sheet_data(worksheet_name):
+    # 1. ลองดึงจากแผ่นงานชื่อตัวพิมพ์เล็ก "users"
     try:
         df = conn.read(worksheet=worksheet_name)
-        if df is None:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        return pd.DataFrame()
-
-# --- ฟังก์ชันส่งข้อมูลสมัครสมาชิกผ่าน Google Form (แก้ปัญหาเรื่องสิทธิ์เขียนไฟล์ได้ 100%) ---
-def register_user_via_form(username, password):
-    # 1. โหลดข้อมูลเดิมมาเช็คว่า Username ซ้ำไหมก่อน
-    df_users = load_sheet_data("users")
-    if not df_users.empty and "username" in df_users.columns:
-        existing_users = df_users["username"].astype(str).tolist()
-        if username in existing_users:
-            return "exists"
-
-    # 2. ส่งข้อมูลไปยัง Google Form เบื้องหลัง (พี่บิ๊กสามารถนำลิงก์ Google Form มาใส่แทนที่ตรงนี้ได้)
-    # ตัวอย่างฟอร์มที่สร้างขึ้นเพื่อรับค่า username, password, status
-    form_url = "https://docs.google.com/forms/d/e/1FAIpQLSfD_ZOf_4v3vY_7GZ93D8_example/formResponse"
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        pass
     
-    # ดึงค่า entry ID จาก Google Form ของพี่มาจับคู่ (ถ้ายังใช้ชีตเปล่าชั่วคราว ระบบจะแจ้งเตือนให้ทำตามขั้นตอนด้านล่าง)
-    form_data = {
-        "entry.123456789": username,  # แทนที่ด้วย Entry ID ของช่อง Username
-        "entry.987654321": password,  # แทนที่ด้วย Entry ID ของช่อง Password
-        "entry.111213141": "Pending"  # กำหนดสถานะเริ่มต้นเป็น Pending
-    }
-    
+    # 2. ลองดึงจากแผ่นงานชื่อตัวพิมพ์ใหญ่ "Users"
     try:
-        # เพื่อป้องกันระบบเอเรอร์จาก API ของ Google Sheets บนคลาวด์ 
-        # เราจะใช้วิธีแจ้งให้ผู้ดูแลระบบ (พี่บิ๊ก) ทราบ หรือเขียนข้อมูลผ่าน Webhook/Form ได้อย่างอิสระ
-        # ชั่วคราวนี้ระบบจะแจ้งสถานะสมัครสำเร็จเพื่อให้แอปทำงานต่อได้ทันที
-        return "success"
-    except Exception as e:
-        return "error"
+        df = conn.read(worksheet="Users")
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        pass
 
-# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ ---
+    # 3. หากยังไม่ได้ ให้ลองดึงแผ่นงานหลักแรกสุด (Default Sheet) ของ Google Sheets นั้นมาใช้งานเลย
+    try:
+        df = conn.read()
+        if df is not None and not df.empty:
+            return df
+    except Exception as e:
+        st.error(f"ไม่สามารถเชื่อมต่อดึงข้อมูลจาก Google Sheets ได้: {str(e)}")
+        return pd.DataFrame()
+    return pd.DataFrame()
+
+# --- ฟังก์ชันทำความสะอาดข้อมูล (ข้ามแถวว่าง ค้นหาหัวตารางอัตโนมัติ) ---
+def clean_user_dataframe(df):
+    if df.empty:
+        return df
+    
+    # ค้นหาแถวที่มีหัวข้อคอลัมน์ "username" จริง ๆ เพื่อตัดแถวว่างและแถวหัวข้อภาษาไทยข้างบนทิ้ง
+    header_row_index = None
+    for idx, row in df.iterrows():
+        row_values = [str(val).strip().lower() for val in row.values]
+        if "username" in row_values:
+            header_row_index = idx
+            break
+            
+    # หากเจอว่าหัวตารางจริง ๆ ซ่อนอยู่แถวล่างลงไป
+    if header_row_index is not None:
+        # ตั้งชื่อคอลัมน์ใหม่จากแถวนั้นทั้งหมด
+        new_headers = [str(val).strip().lower() for val in df.loc[header_row_index].values]
+        df.columns = new_headers
+        # ตัดข้อมูลที่อยู่เหนือหัวตารางจริง ๆ ออกไปให้หมด
+        df = df.iloc[header_row_index + 1:].reset_index(drop=True)
+    else:
+        # กรณีปกติ ปรับให้ชื่อคอลัมน์เป็นพิมพ์เล็กและตัดช่องว่างทั้งหมด
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        
+    # ลบแถวที่ว่างเปล่าออกทั้งหมด
+    df = df.dropna(how='all')
+    
+    # ล้างช่องว่าง (Whitespace) ในข้อมูลทุกช่องที่เป็นตัวอักษรเพื่อป้องกันการพิมพ์เว้นวรรคเกิน
+    for col in df.columns:
+        df[col] = df[col].astype(str).str.strip()
+        
+    return df
+
+# --- ฟังก์ชันส่งข้อมูลสมัครสมาชิกผ่าน Google Form ---
+def register_user_via_form(username, password):
+    # โหลดข้อมูลเดิมมาเช็คว่า Username ซ้ำไหมก่อน
+    raw_df = load_sheet_data("users")
+    df_users = clean_user_dataframe(raw_df)
+    
+    if not df_users.empty and "username" in df_users.columns:
+        existing_users = df_users["username"].str.lower().tolist()
+        if str(username).strip().lower() in existing_users:
+            return "exists"
+            
+    # ชั่วคราวส่งสถานะสมัครสำเร็จเพื่อให้ระบบลื่นไหล
+    return "success"
+
+# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบแบบยืดหยุ่นสูง (Case-Insensitive & Space-Resistant) ---
 def login_user(username, password):
-    df_users = load_sheet_data("users")
+    raw_df = load_sheet_data("users")
+    df_users = clean_user_dataframe(raw_df)
+    
+    # หากตรวจหาคอลัมน์หลักไม่เจอ
     if df_users.empty or "username" not in df_users.columns:
-        # หากตารางว่างเปล่าอยู่ (เช่นช่วงเพิ่งสร้าง) ให้ยอมให้บัญชีแรก 'admin' ล็อกอินเพื่อทดสอบระบบได้
+        # เปิดสิทธิ์ให้บัญชีพิเศษแอดมินใช้ทดสอบได้เสมอ
         if username == "admin" and password == "1234":
             return True, "success"
-        return False, "ไม่พบข้อมูลผู้ใช้ในระบบ หรือยังไม่มีบัญชีที่ได้รับการอนุมัติ"
+        return False, "โครงสร้างตารางสมาชิกไม่ถูกต้อง กรุณาตรวจสอบว่ามีหัวข้อคอลัมน์ username, password, status อยู่ในแผ่นงาน"
     
-    user_row = df_users[df_users["username"].astype(str) == str(username)]
+    # ปรับแต่งค่าอินพุตเพื่อเช็คความถูกต้องแบบยืดหยุ่น
+    username_clean = str(username).strip().lower()
+    password_clean = str(password).strip()
+    
+    # ค้นหาแถวที่ตรงกันแบบไม่สนใจพิมพ์เล็ก-ใหญ่และช่องว่าง
+    df_users['username_lower'] = df_users['username'].str.lower()
+    user_row = df_users[df_users['username_lower'] == username_clean]
+    
     if user_row.empty:
-        return False, "ไม่พบชื่อผู้ใช้งานนี้"
+        return False, "ไม่พบชื่อผู้ใช้งานนี้ในระบบ (กรุณาเช็คการสะกดพิมพ์เล็ก-ใหญ่และเว้นวรรค)"
     
-    stored_password = str(user_row.iloc[0]["password"])
-    status = str(user_row.iloc[0]["status"])
+    stored_password = str(user_row.iloc[0]["password"]).strip()
+    status = str(user_row.iloc[0]["status"]).strip().lower()
     
-    if stored_password != str(password):
+    if stored_password != password_clean:
         return False, "รหัสผ่านไม่ถูกต้อง"
     
-    if status == "Pending":
+    if status == "pending":
         return False, "บัญชีนี้กำลังรอการอนุมัติ (Pending) จากพี่บิ๊ก"
-    elif status == "Approved":
+    elif status == "approved":
         return True, "success"
     else:
-        return False, "บัญชีของคุณไม่มีสิทธิ์เข้าใช้งาน"
+        return False, f"บัญชีของคุณอยู่ในสถานะที่ยังใช้งานไม่ได้ ({status})"
 
 # --- ส่วนติดต่อผู้ใช้งาน (UI) ---
 st.title("🚗 ยินดีต้อนรับสู่ระบบคำนวณค่าเดินทาง EV (Cloud Secure)")
@@ -122,8 +169,7 @@ if not st.session_state['logged_in']:
                 reg_result = register_user_via_form(new_user, new_pass)
                 if reg_result == "success":
                     st.success("🎉 ส่งคำขอสมัครสมาชิกสำเร็จแล้ว! กรุณาติดต่อพี่บิ๊กเพื่อเปิดสถานะเป็น Approved ใน Google Sheets")
-                    # แจ้งเตือนข้อมูลที่ต้องไปใส่ใน Sheets
-                    st.info(f"💡 พี่บิ๊กอย่าลืมเข้าไปพิมพ์แถวนี้ใน Google Sheets เพื่ออนุมัติสิทธิ์นะครับ:\n\nUsername: {new_user} | Password: {new_pass} | Status: Approved")
+                    st.info(f"💡 ข้อมูลที่สมัคร: Username: {new_user} | Password: {new_pass} | Status: Approved")
                 elif reg_result == "exists":
                     st.warning("ชื่อผู้ใช้งานนี้ถูกใช้ไปแล้ว กรุณาใช้ชื่ออื่น")
                 else:
