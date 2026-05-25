@@ -27,31 +27,31 @@ def clean_sheet_value(val):
             pass
     return val_str
 
-# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (เพิ่มระบบป้องกันกรณีหาชื่อแท็บไม่เจอ) ---
+# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (ปรับแต่งให้ทำความสะอาดชื่อคอลัมน์อย่างเด็ดขาด) ---
 def load_sheet_data(worksheet_name):
-    # 1. พยายามดึงข้อมูลโดยระบุชื่อแท็บที่ต้องการก่อน
+    # 1. พยายามดึงข้อมูลโดยระบุชื่อแท็บก่อน
     try:
         df = conn.read(worksheet=worksheet_name, ttl=0)
         if df is not None and not df.empty:
+            # ล้างช่องว่างหัว-ท้ายของชื่อคอลัมน์ และแปลงเป็นตัวพิมพ์เล็กทั้งหมด
             df.columns = [str(c).strip().lower() for c in df.columns]
             return df
     except Exception as e_first:
-        # เก็บข้อผิดพลาดแรกไว้เพื่อวิเคราะห์
         first_error_msg = str(e_first)
         
-    # 2. ป้องกันหน้าจอพัง (Fallback): หากดึงชื่อแท็บด้านบนไม่สำเร็จ ให้ดึงแผ่นงานแท็บแรกสุด (Default) ทันที
+    # 2. หากล้มเหลว ให้ลองดึงข้อมูลจากแท็บแรกสุด (Default)
     try:
         df = conn.read(ttl=0)
         if df is not None and not df.empty:
+            # ล้างช่องว่างหัว-ท้ายของชื่อคอลัมน์ และแปลงเป็นตัวพิมพ์เล็กทั้งหมด
             df.columns = [str(c).strip().lower() for c in df.columns]
             return df
     except Exception as e_second:
-        # หากล้มเหลวทั้งสองวิธี จะแสดงคำแนะนำวิธีแก้ปัญหาอย่างชัดเจนให้ผู้ใช้งานทำตามได้ง่ายๆ
         st.error("⚠️ ไม่สามารถเชื่อมต่อกับ Google Sheets ได้")
         st.markdown(f"""
         ### 💡 วิธีแก้ไขปัญหาการเชื่อมต่อ (สำหรับพี่บิ๊ก):
         
-        1. **ตรวจสอบการแชร์ไฟล์ Google Sheets (สำคัญที่สุด!):**
+        1. **ตรวจสอบการแชร์ไฟล์ Google Sheets:**
            * เปิดไฟล์ Google Sheets ของคุณขึ้นมา
            * คลิกปุ่ม **"แชร์" (Share)** สีเขียวที่มุมบนขวา
            * ตรงหัวข้อ *การเข้าถึงทั่วไป* ให้เปลี่ยนจาก **"จำกัด" (Restricted)** เป็น **"ทุกคนที่มีลิงก์" (Anyone with the link)**
@@ -92,35 +92,45 @@ def register_user_via_form(username, password):
     except Exception as e:
         return "error"
 
-# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (แก้ไขบั๊กตรวจสอบสิทธิ์และรองรับแถวซ้ำเรียบร้อยแล้ว) ---
+# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (ปรับปรุงการดักจับข้อผิดพลาดคอลัมน์หายรัดกุม 100%) ---
 def login_user(username, password):
     df_users = load_sheet_data("users")
     
-    # 1. ตรวจสอบโครงสร้างข้อมูล
-    if df_users.empty or "username" not in df_users.columns:
+    if df_users.empty:
+        # ให้สิทธิ์แอดมินฉุกเฉินกรณีดึงข้อมูลชีตไม่ได้เลย
         if username == "admin" and password == "1234":
             return True, "success"
-        return False, "❌ ไม่พบโครงสร้างคอลัมน์ผู้ใช้งานใน Google Sheet (กรุณาตรวจสอบว่ามีหัวคอลัมน์ชื่อ 'username', 'password', 'status' หรือไม่)"
+        return False, "❌ ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ กรุณาตรวจสอบสิทธิ์การแชร์ลิงก์ของ Google Sheets"
+
+    # พิมพ์ชื่อคอลัมน์ที่ระบบตรวจจับได้จริงออกทางหน้าจอ (ถ้าเกิดปัญหา เจ้านายจะได้เช็คได้ทันที)
+    available_cols = list(df_users.columns)
     
-    # 2. ทำความสะอาดข้อมูลนำเข้า
+    # ดักจับกรณีไม่มีคอลัมน์หลักในชีต
+    required_cols = ["username", "password", "status"]
+    missing_cols = [col for col in required_cols if col not in available_cols]
+    
+    if missing_cols:
+        return False, f"❌ ตารางใน Google Sheets ขาดคอลัมน์สำคัญ: {', '.join(missing_cols)} (คอลัมน์ที่ระบบมองเห็นตอนนี้คือ: {', '.join(available_cols)})"
+    
+    # ทำความสะอาดข้อมูลนำเข้า
     input_user_clean = str(username).strip().lower()
     input_password_clean = str(password).strip()
     
-    # แปลงข้อมูลใน DataFrame เพื่อการเปรียบเทียบที่แม่นยำ
+    # แปลงข้อมูลใน DataFrame เพื่อความแม่นยำสูงสุด
     df_users["clean_username"] = df_users["username"].apply(lambda x: clean_sheet_value(x).lower())
     df_users["clean_password"] = df_users["password"].apply(clean_sheet_value)
     
-    # 3. ตรวจสอบว่ามีชื่อผู้ใช้นี้อยู่หรือไม่
+    # ตรวจสอบชื่อผู้ใช้งาน
     user_rows = df_users[df_users["clean_username"] == input_user_clean]
     if user_rows.empty:
         return False, "❌ ไม่พบชื่อผู้ใช้งานนี้ในระบบ"
     
-    # 4. ตรวจสอบคู่ของ Username และ Password ที่ถูกต้องตรงกัน (รองรับกรณีสมัครซ้ำหรือทดสอบหลายแถว)
+    # ตรวจสอบคู่รหัสผ่านที่ถูกต้องตรงกัน
     matched_user = user_rows[user_rows["clean_password"] == input_password_clean]
     if matched_user.empty:
         return False, "❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
     
-    # 5. ตรวจสอบสถานะการอนุมัติ (อ้างอิงแถวแรกที่ตรวจพบรหัสถูกต้อง)
+    # ตรวจสอบสถานะการอนุมัติใช้งาน
     status = clean_sheet_value(matched_user.iloc[0]["status"]).strip().lower()
     
     if status == "pending":
