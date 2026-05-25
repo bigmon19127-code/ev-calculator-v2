@@ -27,14 +27,14 @@ def clean_sheet_value(val):
             pass
     return val_str
 
-# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (ปรับแต่งให้ทำความสะอาดชื่อคอลัมน์อย่างเด็ดขาด) ---
+# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (ทำความสะอาดชื่อคอลัมน์อย่างหมดจด) ---
 def load_sheet_data(worksheet_name):
     # 1. พยายามดึงข้อมูลโดยระบุชื่อแท็บก่อน
     try:
         df = conn.read(worksheet=worksheet_name, ttl=0)
         if df is not None and not df.empty:
-            # ล้างช่องว่างหัว-ท้ายของชื่อคอลัมน์ และแปลงเป็นตัวพิมพ์เล็กทั้งหมด
-            df.columns = [str(c).strip().lower() for c in df.columns]
+            # ลบช่องว่างหัว-ท้ายของชื่อคอลัมน์อย่างหนาแน่น และแปลงเป็นตัวพิมพ์เล็ก
+            df.columns = [str(c).strip().replace(" ", "").lower() for c in df.columns]
             return df
     except Exception as e_first:
         first_error_msg = str(e_first)
@@ -43,8 +43,8 @@ def load_sheet_data(worksheet_name):
     try:
         df = conn.read(ttl=0)
         if df is not None and not df.empty:
-            # ล้างช่องว่างหัว-ท้ายของชื่อคอลัมน์ และแปลงเป็นตัวพิมพ์เล็กทั้งหมด
-            df.columns = [str(c).strip().lower() for c in df.columns]
+            # ลบช่องว่างหัว-ท้ายของชื่อคอลัมน์อย่างหนาแน่น และแปลงเป็นตัวพิมพ์เล็ก
+            df.columns = [str(c).strip().replace(" ", "").lower() for c in df.columns]
             return df
     except Exception as e_second:
         st.error("⚠️ ไม่สามารถเชื่อมต่อกับ Google Sheets ได้")
@@ -92,7 +92,7 @@ def register_user_via_form(username, password):
     except Exception as e:
         return "error"
 
-# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (ปรับปรุงการดักจับข้อผิดพลาดคอลัมน์หายรัดกุม 100%) ---
+# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (ปรับปรุงแก้ไขความคลาดเคลื่อนของชื่อคอลัมน์) ---
 def login_user(username, password):
     df_users = load_sheet_data("users")
     
@@ -102,36 +102,48 @@ def login_user(username, password):
             return True, "success"
         return False, "❌ ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ กรุณาตรวจสอบสิทธิ์การแชร์ลิงก์ของ Google Sheets"
 
-    # พิมพ์ชื่อคอลัมน์ที่ระบบตรวจจับได้จริงออกทางหน้าจอ (ถ้าเกิดปัญหา เจ้านายจะได้เช็คได้ทันที)
+    # บังคับทำความสะอาดชื่อคอลัมน์ซ้ำอีกครั้งเพื่อความชัวร์ 100%
+    df_users.columns = [str(c).strip().replace(" ", "").lower() for c in df_users.columns]
     available_cols = list(df_users.columns)
     
-    # ดักจับกรณีไม่มีคอลัมน์หลักในชีต
-    required_cols = ["username", "password", "status"]
-    missing_cols = [col for col in required_cols if col not in available_cols]
+    # กำหนดคอลัมน์ที่ต้องใช้จริงแบบล้างค่าแล้ว
+    col_user = "username"
+    col_pass = "password"
+    col_status = "status"
     
-    if missing_cols:
-        return False, f"❌ ตารางใน Google Sheets ขาดคอลัมน์สำคัญ: {', '.join(missing_cols)} (คอลัมน์ที่ระบบมองเห็นตอนนี้คือ: {', '.join(available_cols)})"
+    # ตรวจสอบหาคอลัมน์แบบยืดหยุ่น (ดูว่ามีคำนั้นอยู่ในชื่อคอลัมน์ไหม ป้องกันวรรคเกิน)
+    found_user_col = [c for c in available_cols if "username" in c]
+    found_pass_col = [c for c in available_cols if "password" in c]
+    found_status_col = [c for c in available_cols if "status" in c]
+    
+    if not found_user_col or not found_pass_col or not found_status_col:
+        return False, f"❌ โครงสร้างตารางไม่ถูกต้อง คอลัมน์ที่ระบบตรวจพบคือ: {', '.join(available_cols)} (กรุณาใช้คอลัมน์ชื่อ username, password, status)"
+    
+    # กำหนดชื่อคอลัมน์จริงที่ค้นพบ
+    real_user_col = found_user_col[0]
+    real_pass_col = found_pass_col[0]
+    real_status_col = found_status_col[0]
     
     # ทำความสะอาดข้อมูลนำเข้า
     input_user_clean = str(username).strip().lower()
     input_password_clean = str(password).strip()
     
-    # แปลงข้อมูลใน DataFrame เพื่อความแม่นยำสูงสุด
-    df_users["clean_username"] = df_users["username"].apply(lambda x: clean_sheet_value(x).lower())
-    df_users["clean_password"] = df_users["password"].apply(clean_sheet_value)
+    # ทำความสะอาดข้อมูลใน DataFrame ป้องกันจุดทศนิยมหรือช่องว่าง
+    df_users["clean_username"] = df_users[real_user_col].apply(lambda x: clean_sheet_value(x).lower())
+    df_users["clean_password"] = df_users[real_pass_col].apply(clean_sheet_value)
     
     # ตรวจสอบชื่อผู้ใช้งาน
     user_rows = df_users[df_users["clean_username"] == input_user_clean]
     if user_rows.empty:
         return False, "❌ ไม่พบชื่อผู้ใช้งานนี้ในระบบ"
     
-    # ตรวจสอบคู่รหัสผ่านที่ถูกต้องตรงกัน
+    # ตรวจสอบรหัสผ่านที่จับคู่ถูกต้อง
     matched_user = user_rows[user_rows["clean_password"] == input_password_clean]
     if matched_user.empty:
         return False, "❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
     
-    # ตรวจสอบสถานะการอนุมัติใช้งาน
-    status = clean_sheet_value(matched_user.iloc[0]["status"]).strip().lower()
+    # ตรวจสอบสถานะการอนุมัติ
+    status = clean_sheet_value(matched_user.iloc[0][real_status_col]).strip().lower()
     
     if status == "pending":
         return False, "⏳ บัญชีนี้กำลังรอการอนุมัติ (Pending) จากพี่บิ๊ก กรุณาติดต่อผู้ดูแลระบบ"
