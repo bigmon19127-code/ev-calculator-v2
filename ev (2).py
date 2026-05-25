@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
-conn = st.connection("gsheets", type=GSheetsConnection)
+
 # --- 1. ตั้งค่าหน้าแอป ---
 st.set_page_config(page_title="ระบบคำนวณค่าเดินทาง EV", page_icon="🚗", layout="wide")
 
@@ -19,7 +19,7 @@ except Exception as e:
 def load_sheet_data(worksheet_name):
     try:
         # ใช้ ttl=0 เพื่อไม่ใช้ข้อมูลแคชเก่า และบังคับอ่านสดจาก Google Sheets เสมอ
-        conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+        return conn.read(worksheet=worksheet_name, ttl=0)
     except Exception as e:
         # หากเกิดข้อผิดพลาดในการอ่าน หรือแผ่นงานยังไม่มี ให้ส่งตารางเปล่ากลับไป
         return pd.DataFrame()
