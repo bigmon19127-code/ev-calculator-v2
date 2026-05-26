@@ -38,7 +38,7 @@ def load_sheet_data(worksheet_name):
 def save_trip_via_form(username, distance, efficiency, electricity_rate, total_cost):
     """ ฟังก์ชันส่งข้อมูลการเดินทางกลับเข้าแผ่นงาน trips อัตโนมัติ (ผ่าน Google Form ของพี่บิ๊ก) """
     # ⚠️ นำลิงก์ Form Response ที่ผูกกับแผ่นงาน trips ของพี่บิ๊กมาใส่แทนที่ลิงก์ตัวอย่างนี้ได้เลยครับ
-    form_url = "https://docs.google.com/spreadsheets/d/10hcY_rRilLkaXE_YvDGUktxdeAAJquu51nEwjq9ZV0E/edit?usp=sharing"
+    form_url = "https://docs.google.com/spreadsheets/d/10hcY_rRilLkaXE_YvDGUktxdeAAJquu51nEwjq9ZV0E/edit?gid=0#gid=0"
     
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     form_data = {
