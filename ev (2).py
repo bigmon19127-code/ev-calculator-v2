@@ -215,8 +215,49 @@ else:
     st.write("### หน้าคำนวณค่าเดินทาง EV และระบบสถิติ")
     st.info("🔓 ล็อกอินสำเร็จ! ยินดีต้อนรับเข้าใช้งานหน้าคำนวณค่าเดินทางหลัก")
     
-    # แผนที่และวิดเจ็ตต่างๆ ด้านล่าง
-    st.markdown("---")
-    st.header("🗺️ แผนที่พิกัดสถานีชาร์จ EV")
-    map_url = "https://www.google.com/maps/d/u/0/embed?mid=12ieBRQK2FUYgCjGt-VehLjKEufqTn4"
-    components.iframe(map_url, width=800, height=500)
+    st.title(f'🚗 ระบบคำนวณค่าเดินทาง & แชร์พิกัด EV')
+
+# --- ส่วนเครื่องคำนวณ ---
+st.header("💰 เครื่องคำนวณค่าใช้จ่าย")
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("⛽ ค่าน้ำมัน")
+    dist = st.number_input("ระยะทาง (กม.)", value=155.0, key="dist_oil")
+    cons = st.number_input("อัตราสิ้นเปลือง (กม./ลิตร)", value=14.0)
+    price = st.number_input("ราคาน้ำมัน (บาท/ลิตร)", value=38.5)
+    
+    if st.button("คำนวณและบันทึก (น้ำมัน)", type="primary"):
+        total_oil = (dist/cons)*price
+        st.success(f"ค่าน้ำมันประมาณ: {total_oil:,.2f} บาท")
+        save_trip(st.session_state['username'], "รถน้ำมัน", dist, total_oil)
+        st.info("✅ บันทึกข้อมูลลงฐานข้อมูลเรียบร้อย")
+        st.rerun()
+        
+with col2:
+    st.subheader("⚡ ค่าไฟ EV")
+    dist_ev = st.number_input("ระยะทาง EV (กม.)", value=155.0, key="dist_ev")
+    eff = st.number_input("อัตรากินไฟ (กม./หน่วย)", value=5.5)
+    price_ev = st.number_input("ค่าไฟ (บาท/หน่วย)", value=4.7)
+    
+    if st.button("คำนวณและบันทึก (EV)", type="primary"):
+        total_ev = (dist_ev/eff)*price_ev
+        st.success(f"ค่าไฟ EV ประมาณ: {total_ev:,.2f} บาท")
+        save_trip(st.session_state['username'], "รถไฟฟ้า", dist_ev, total_ev)
+        st.info("✅ บันทึกข้อมูลลงฐานข้อมูลเรียบร้อย")
+        st.rerun()
+
+# --- ส่วนแสดงข้อมูลย้อนหลังรายเดือน ---
+st.markdown("---")
+st.header("📊 ตารางสรุปประวัติค่าใช้จ่ายรายเดือน")
+with st.expander(f"🔍 คลิกเพื่อเปิด/ปิดดูข้อมูลย้อนหลังรายเดือนของท่าน ({st.session_state['username']})", expanded=True):
+    history_df = get_monthly_history(st.session_state['username'])
+    if not history_df.empty:
+        st.dataframe(history_df, use_container_width=True)
+    else:
+        st.info("💡 ยังไม่มีประวัติการเดินทางถูกบันทึกในระบบ")
+
+# --- ส่วนแผนที่ ---
+st.markdown("---")
+st.header("🗺️ แผนที่พิกัดสถานีชาร์จ EV")
+map_url = "https://www.google.com/maps/d/u/0/embed?mid=12ieBRQK2FUYgGcjGt-VehLjKEufqTn4"
+components.iframe(map_url, width=800, height=500)
