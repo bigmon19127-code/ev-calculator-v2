@@ -46,7 +46,7 @@ def save_trip_via_form(username, distance, efficiency, electricity_rate, total_c
     
     # 📝 วิธีใช้งาน: สร้าง Google Form ที่มีคำถาม 6 ข้อตามนี้ จากนั้นส่งฟอร์มและคัดลอกลิงก์ส่วนที่ลงท้ายด้วย /formResponse มาใส่ที่นี่
     # และเปลี่ยนชื่อ entry.xxxxxxxxx ให้ตรงกับไอดีฟิลด์ของคำถามนั้นๆ ครับ
-    form_url = "https://docs.google.com/forms/u/0/"
+    form_url = "https://docs.google.com/spreadsheets/d/12-13SGS49TULHvyVxVz3azrPbg7Fdh3X8mpIBm08uR0/edit?usp=sharing"
     
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     form_data = {
