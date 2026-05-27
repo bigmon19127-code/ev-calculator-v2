@@ -5,8 +5,10 @@ import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
 import requests
 
+# 🌐 ลิงก์ Google Sheets ของพี่บิ๊ก (เชื่อมต่อโดยตรงผ่าน ID ที่ระบุ)
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/10hcY_rRilLkaXE_YvDGUktxdeAAJquu51nEwjq9ZV0E/edit?usp=sharing"
+
 # --- 1. เชื่อมต่อ Google Sheets ---
-# ระบบจะดึงข้อมูลจากหน้าเว็บ Google Sheets ที่กำหนดไว้ใน Secrets ของ Streamlit Cloud
 try:
     conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 except Exception as e:
@@ -29,16 +31,15 @@ def clean_sheet_value(val):
     return val_str
 
 def load_sheet_data(worksheet_name):
-    """ ฟังก์ชันดึงข้อมูลจากแท็บชีตที่ระบุอย่างเจาะจงและเสถียรที่สุด """
+    """ ฟังก์ชันดึงข้อมูลจากแท็บชีตที่ระบุตามลิงก์ Google Sheets ของพี่บิ๊กโดยตรง """
     try:
-        # บังคับระบุชื่อแท็บ (Worksheet) เพื่อป้องกันดึงข้อมูลผิดแท็บมาโชว์
-        df = conn.read(worksheet=worksheet_name, ttl=0)
+        # ระบุ spreadsheet url และ worksheet name อย่างเจาะจงเพื่อไม่ให้ดึงสลับแท็บ
+        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=worksheet_name, ttl=0)
         if df is not None and not df.empty:
             # แปลงหัวคอลัมน์ทั้งหมดเป็นอักษรตัวเล็ก และลบช่องว่างเพื่อป้องกันระบบเอเรอร์
             df.columns = [str(c).strip().replace(" ", "").lower() for c in df.columns]
             return df
     except Exception as e:
-        # หากเจาะจงแท็บแล้วพัง ให้ลองสแกนหาแท็บที่มีคำใกล้เคียง หรือแจ้งเตือนระบบ
         st.session_state["sheet_error"] = f"ไม่สามารถเปิดแท็บ '{worksheet_name}' ได้: {str(e)}"
     return pd.DataFrame()
 
@@ -68,7 +69,6 @@ def save_trip_via_form(username, distance, efficiency, electricity_rate, total_c
 
 def login_user(username, password):
     """ ฟังก์ชันสำหรับเช็คสิทธิ์ล็อกอินตามข้อมูลในแท็บ users """
-    # กำหนดดึงข้อมูลจากแท็บ "users" เท่านั้น
     df_users = load_sheet_data("users")
     
     if df_users.empty:
@@ -83,7 +83,7 @@ def login_user(username, password):
     input_user = str(username).strip().lower()
     input_pass = str(password).strip()
 
-    # ตรวจสอบหาคอลัมน์
+    # ตรวจสอบหาคอลัมน์หลัก
     if "username" not in df_users.columns or "password" not in df_users.columns or "status" not in df_users.columns:
         return False, f"❌ หัวตารางในชีตแท็บ users ต้องมีคำว่า: username, password, status (ตรวจพบหัวตารางปัจจุบันคือ: {', '.join(df_users.columns)})"
 
@@ -208,8 +208,7 @@ else:
     with col_history:
         st.markdown("#### 📁 ประวัติทริปย้อนหลังของฉัน")
         
-        # ⚠️ ดึงข้อมูลเฉพาะจากแท็บ "trips" หรือถ้าใช้ตารางที่ฟอร์มสร้างอัตโนมัติ ให้แก้เป็นชื่อแท็บนั้นแทน เช่น "ฟอร์มไม่มีชื่อ (การตอบกลับ)"
-        # แนะนำให้พี่บิ๊กเปลี่ยนชื่อแท็บใน Google Sheets ที่มีคำถาม username, distance... นั้นให้ชื่อเป็น "trips" จะเสถียรที่สุดครับ
+        # ⚠️ ดึงข้อมูลเฉพาะจากแท็บ "trips" ใน Google Sheet ID ของพี่บิ๊ก
         df_trips = load_sheet_data("trips")
         
         if not df_trips.empty:
