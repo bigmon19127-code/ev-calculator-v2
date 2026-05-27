@@ -13,7 +13,16 @@ try:
     conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 except Exception as e:
     st.error(f"⚠️ เกิดข้อผิดพลาดในการเชื่อมโยงฐานข้อมูล: {e}")
+# 📥 วางแทรกที่บรรทัด 16 เพื่อดึงข้อมูลจากหน้าแผ่นงาน (เวิร์กชีต) มาใช้งาน
+try:
+    df_users = conn.read(spreadsheet=URL_of_spreadsheet, worksheet="users", ttl="0")
+except Exception as e:
+    df_users = pd.DataFrame(columns=["username", "password", "status"])
 
+try:
+    df_trips = conn.read(spreadsheet=URL_of_spreadsheet, worksheet="trips", ttl="0")
+except Exception as e:
+    df_trips = pd.DataFrame(columns=["username", "distance", "efficiency", "electricity_rate", "total_cost", "datetime"])
 # ตั้งค่าส่วนหัวของหน้าเว็บแอปพลิเคชัน
 st.set_page_config(page_title="ระบบคำนวณค่าเดินทาง EV", page_icon="🚗", layout="wide")
 
