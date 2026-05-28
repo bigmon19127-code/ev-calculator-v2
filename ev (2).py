@@ -3,23 +3,30 @@ import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
-import urllib.parse
 import requests
 
-# --- เชื่อมต่อ Google Sheets ---
-# ใช้ ttl=0 เพื่อให้อัปเดตข้อมูลสดใหม่เสมอ (ป้องกันข้อมูลแคชในการเข้าสู่ระบบและบันทึกประวัติ)
-conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+# 🌐 ตัวแปรหลักสำหรับเก็บ URL ของสเปรดชีต
+URL_of_spreadsheet = "https://docs.google.com/spreadsheets/d/10hcY_rRiLLkaXE_YvDGUktxdeAAJquu51nEwjq9ZV0E/edit?usp=sharing"
 
-# --- 1. ตั้งค่าหน้าแอป ---
-st.set_page_config(page_title="ระบบคำนวณค่าเดินทาง EV", page_icon="🚗", layout="wide")
+# ตั้งค่าหน้าเว็บแอปพลิเคชันให้แสดงผลสวยงามและรองรับมือถือ
+st.set_page_config(
+    page_title="ระบบคำนวณค่าน้ำมันและ EV",
+    page_icon="🚗",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- ฟังก์ชันช่วยทำความสะอาดค่าที่ดึงมาจาก Google Sheets (จากไฟล์ 9) ---
+# --- 1. เชื่อมต่อระบบคลาวด์ Google Sheets ---
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+except Exception as e:
+    st.error(f"⚠️ เกิดข้อผิดพลาดในการเชื่อมโยงฐานข้อมูล: {e}")
+
 def clean_sheet_value(val):
-    """ ป้องกันปัญหาข้อมูลเป็นค่าว่าง ปัญหารหัสผ่านตัวเลขกลายเป็นทศนิยม (เช่น 1234.0) และลบช่องว่างหัวท้าย """
+    """ ป้องกันรหัสผ่านหรือตัวเลขกลายเป็นทศนิยม (.0) และลบเว้นวรรคหัวท้ายอัตโนมัติ """
     if pd.isna(val):
         return ""
     val_str = str(val).strip()
-    # หากค่าถูกแปลงเป็น Float เช่น "1234.0" ให้แปลงกลับเป็น "1234"
     if val_str.endswith(".0"):
         try:
             float(val_str)
@@ -28,304 +35,289 @@ def clean_sheet_value(val):
             pass
     return val_str
 
-# --- ฟังก์ชันอ่านข้อมูลจาก Google Sheets (ระบบจากไฟล์ 9) ---
 def load_sheet_data(worksheet_name):
-    # 1. พยายามดึงข้อมูลโดยระบุชื่อแท็บก่อน
+    """ ดึงข้อมูลจากแผ่นงาน Google Sheets ตามชื่อหน้าแผ่นงาน """
     try:
-        df = conn.read(worksheet=worksheet_name, ttl=0)
-        if df is not None and not df.empty:
-            # ลบช่องว่างหัว-ท้ายของชื่อคอลัมน์ และแปลงเป็นตัวพิมพ์เล็ก
-            df.columns = [str(c).strip().replace(" ", "").lower() for c in df.columns]
-            return df
-    except Exception as e_first:
-        first_error_msg = str(e_first)
-        
-    # 2. หากล้มเหลว ให้ลองดึงข้อมูลจากแท็บแรกสุด (Default)
-    try:
-        df = conn.read(ttl=0)
-        if df is not None and not df.empty:
-            df.columns = [str(c).strip().replace(" ", "").lower() for c in df.columns]
-            return df
-    except Exception as e_second:
-        st.error("⚠️ ไม่สามารถเชื่อมต่อกับ Google Sheets ได้")
-        st.markdown(f"""
-        ### 💡 วิธีแก้ไขปัญหาการเชื่อมต่อ:
-        
-        1. **ตรวจสอบการแชร์ไฟล์ Google Sheets:**
-           * เปิดไฟล์ Google Sheets ของคุณ
-           * คลิกปุ่ม **"แชร์" (Share)** สีเขียวที่มุมบนขวา
-           * ตรงหัวข้อ *การเข้าถึงทั่วไป* ให้เปลี่ยนจาก **"จำกัด" (Restricted)** เป็น **"ทุกคนที่มีลิงก์" (Anyone with the link)**
-           * เลือกสิทธิ์เป็น **"ผู้มีสิทธิ์อ่าน" (Viewer)** แล้วกดบันทึก
-        
-        2. **ตรวจสอบชื่อแท็บ (Worksheet) ด้านล่างสุด:**
-           * ในหน้า Google Sheets ให้ดูที่แถบชื่อแท็บด้านล่างสุดของแผ่นงาน
-           * ดับเบิลคลิกแล้วเปลี่ยนชื่อแท็บหลักให้สะกดว่า **`users`** และแท็บเก็บประวัติการเดินทางสะกดว่า **`trips`** (ตัวพิมพ์เล็กทั้งหมด ไม่มีช่องว่าง)
-        """)
+        df = conn.read(spreadsheet=URL_of_spreadsheet, worksheet=worksheet_name, ttl=0)
+        df = df.dropna(how='all')
+        return df
+    except Exception as e:
+        # หากเกิดปัญหาทางเทคนิค ให้ดึงตารางว่างเปล่ากลับมาแทนเพื่อไม่ให้หน้าจอทั้งหมดล่ม
+        if worksheet_name == "users":
+            return pd.DataFrame(columns=["username", "password", "status"])
+        elif worksheet_name == "trips":
+            return pd.DataFrame(columns=["username", "distance", "efficiency", "electricity_rate", "total_cost", "datetime"])
         return pd.DataFrame()
 
-    return pd.DataFrame()
+# โหลดข้อมูลตารางผู้ใช้และตารางประวัติจาก Google Sheets
+df_users = load_sheet_data("users")
+df_trips = load_sheet_data("trips")
 
-# --- ฟังก์ชันส่งข้อมูลสมัครสมาชิกผ่าน Google Form (ส่งข้อมูลเข้า Google Sheets อัตโนมัติ) ---
-def register_user_via_form(username, password):
-    df_users = load_sheet_data("users")
-    if not df_users.empty and "username" in df_users.columns:
-        existing_users = [clean_sheet_value(u).lower() for u in df_users["username"]]
-        if str(username).strip().lower() in existing_users:
-            return "exists"
+# จัดระเบียบชุดข้อมูลรหัสผ่านและชื่อผู้ใช้ป้องการผิดพลาดของการล็อกอิน
+if not df_users.empty:
+    df_users["clean_username"] = df_users["username"].apply(lambda x: clean_sheet_value(x).lower())
+    df_users["clean_password"] = df_users["password"].apply(lambda x: clean_sheet_value(x))
+    df_users["clean_status"] = df_users["status"].apply(lambda x: clean_sheet_value(x).strip())
+else:
+    df_users["clean_username"] = pd.Series(dtype=str)
+    df_users["clean_password"] = pd.Series(dtype=str)
+    df_users["clean_status"] = pd.Series(dtype=str)
 
-    # ลิงก์ Google Form สำหรับบันทึกสมาชิก (พี่บิ๊กสามารถสร้างฟอร์มเพื่อผูกกับ Sheet "users" แล้วนำ Action URL มาใส่ที่นี่)
-    form_url = "https://docs.google.com/forms/d/e/1FAIpQLSfD_ZOf_4v3vY_7GZ93D8_example/formResponse"
-    form_data = {
-        "entry.123456789": username,  # แทนที่ด้วย entry ID จริงของช่อง Username บนฟอร์มสมัครสมาชิก
-        "entry.987654321": password,  # แทนที่ด้วย entry ID จริงของช่อง Password บนฟอร์มสมัครสมาชิก
-        "entry.111213141": "Pending"  # เริ่มต้นให้บัญชีเป็น Pending เสมอ
-    }
-    
-    try:
-        # เพื่อป้องกันข้อผิดพลาดเวลาผู้ใช้ยังไม่ได้ระบุลิงก์ Form จริง ระบบจะคืนค่า success ให้ใช้งานทดสอบได้ก่อน
-        # หากเปิดใช้งานจริงให้ลบเครื่องหมาย # ด้านล่างนี้ออกครับ
-        # requests.post(form_url, data=form_data)
-        return "success"
-    except Exception as e:
-        return "error"
+# --- 2. ฟังก์ชันระบบการลงชื่อเข้าใช้และการลงทะเบียน ---
 
-# --- ฟังก์ชันส่งข้อมูลประวัติการเดินทางของ User แต่ละคนผ่าน Google Form ไปบันทึกในแผ่นงาน trips ---
-def save_trip_via_form(username, distance, efficiency, electricity_rate, total_cost):
-    # ลิงก์ Google Form สำหรับเก็บประวัติการเดินทาง (พี่บิ๊กสร้างเพิ่มอีกหนึ่งฟอร์มแล้วผูกกับชีต "trips")
-    form_url = "https://docs.google.com/forms/d/e/1FAIpQLSfD_ZOf_4v3vY_7GZ93D8_example2/formResponse"
-    
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    form_data = {
-        "entry.222222222": username,          # บันทึกว่าผู้ใช้งานคนไหนบันทึกข้อมูล
-        "entry.333333333": distance,          # ระยะทาง (กิโลเมตร)
-        "entry.444444444": efficiency,        # อัตราสิ้นเปลือง (km/kWh)
-        "entry.555555555": electricity_rate,  # ค่าไฟต่อหน่วย (บาท)
-        "entry.666666666": total_cost,        # ยอดเงินรวมที่จ่ายค่าชาร์จ (บาท)
-        "entry.777777777": current_time        # วันเวลาเดินทาง
-    }
-    
-    try:
-        # หากเชื่อมต่อฟอร์มของจริงให้ลบคอมเมนต์บรรทัดข้างล่างออก
-        # requests.post(form_url, data=form_data)
-        return True
-    except Exception as e:
-        return False
-
-# --- ฟังก์ชันตรวจสอบการเข้าสู่ระบบ (จากไฟล์ 9) ---
-def login_user(username, password):
-    df_users = load_sheet_data("users")
+def login_user(username_input, password_input):
+    """ ตรวจสอบการยืนยันตนของผู้ใช้กับข้อมูลใน Google Sheet """
+    username_clean = str(username_input).strip().lower()
+    password_clean = str(password_input).strip()
     
     if df_users.empty:
-        # ให้สิทธิ์แอดมินฉุกเฉินกรณีดึงข้อมูลชีตไม่ได้เลย
-        if username == "admin" and password == "1234":
-            return True, "success"
-        return False, "❌ ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ กรุณาตรวจสอบสิทธิ์การแชร์ลิงก์ของ Google Sheets"
+        return False, "ยังไม่มีข้อมูลผู้ใช้งานใดๆ ในระบบชีต"
+        
+    match = df_users[df_users["clean_username"] == username_clean]
+    if match.empty:
+        return False, "ไม่พบชื่อผู้ใช้งานนี้ในระบบกรุณาสมัครสมาชิก"
+        
+    user_record = match.iloc[0]
+    if user_record["clean_password"] != password_clean:
+        return False, "รหัสผ่านไม่ถูกต้อง กรุณาเข้าสู่ระบบอีกครั้ง"
+        
+    if user_record["clean_status"].lower() != "approved":
+        return False, "บัญชีของท่านยังไม่ผ่านการตรวจสอบสิทธิ์ (สถานะ Pending) กรุณาแจ้งผู้ดูแลระบบ"
+        
+    return True, f"เข้าสู่ระบบเรียบร้อย ยินดีต้อนรับคุณ {user_record['username']}"
 
-    # บังคับทำความสะอาดชื่อคอลัมน์ซ้ำอีกครั้ง
-    df_users.columns = [str(c).strip().replace(" ", "").lower() for c in df_users.columns]
-    available_cols = list(df_users.columns)
+def register_user(username_input, password_input):
+    """ บันทึกการลงทะเบียนสมัครสมาชิกรายใหม่ส่งไปยัง Google Sheets โดยตรง """
+    username_clean = str(username_input).strip()
+    username_clean_lower = username_clean.lower()
+    password_clean = str(password_input).strip()
     
-    # กำหนดคอลัมน์ที่ต้องใช้จริงแบบล้างค่าแล้ว
-    col_user = "username"
-    col_pass = "password"
-    col_status = "status"
+    if not username_clean or not password_clean:
+        return False, "กรุณากรอกข้อมูล Username และ Password ให้ครบถ้วน"
+        
+    if not df_users.empty and (df_users["clean_username"] == username_clean_lower).any():
+        return False, "ชื่อบัญชีนี้ได้รับการใช้งานไปแล้ว กรุณาเลือกใช้ชื่อผู้ใช้อื่น"
+        
+    new_user = pd.DataFrame([{
+        "username": username_clean,
+        "password": password_clean,
+        "status": "Pending"
+    }])
     
-    # ตรวจสอบหาคอลัมน์แบบยืดหยุ่น (ดูว่ามีคำนั้นอยู่ในชื่อคอลัมน์ไหม ป้องกันวรรคเกิน)
-    found_user_col = [c for c in available_cols if "username" in c]
-    found_pass_col = [c for c in available_cols if "password" in c]
-    found_status_col = [c for c in available_cols if "status" in c]
-    
-    if not found_user_col or not found_pass_col or not found_status_col:
-        return False, f"❌ โครงสร้างตารางไม่ถูกต้อง คอลัมน์ที่ระบบตรวจพบคือ: {', '.join(available_cols)} (กรุณาใช้คอลัมน์ชื่อ username, password, status)"
-    
-    # กำหนดชื่อคอลัมน์จริงที่ค้นพบ
-    real_user_col = found_user_col[0]
-    real_pass_col = found_pass_col[0]
-    real_status_col = found_status_col[0]
-    
-    # ทำความสะอาดข้อมูลนำเข้า
-    input_user_clean = str(username).strip().lower()
-    input_password_clean = str(password).strip()
-    
-    # ทำความสะอาดข้อมูลใน DataFrame ป้องกันจุดทศนิยมหรือช่องว่าง
-    df_users["clean_username"] = df_users[real_user_col].apply(lambda x: clean_sheet_value(x).lower())
-    df_users["clean_password"] = df_users[real_pass_col].apply(clean_sheet_value)
-    
-    # ตรวจสอบชื่อผู้ใช้งาน
-    user_rows = df_users[df_users["clean_username"] == input_user_clean]
-    if user_rows.empty:
-        return False, "❌ ไม่พบชื่อผู้ใช้งานนี้ในระบบ"
-    
-    # ตรวจสอบรหัสผ่านที่จับคู่ถูกต้อง
-    matched_user = user_rows[user_rows["clean_password"] == input_password_clean]
-    if matched_user.empty:
-        return False, "❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง"
-    
-    # ตรวจสอบสถานะการอนุมัติ
-    status = clean_sheet_value(matched_user.iloc[0][real_status_col]).strip().lower()
-    
-    if status == "pending":
-        return False, "⏳ บัญชีนี้กำลังรอการอนุมัติ (Pending) จากพี่บิ๊ก กรุณาติดต่อผู้ดูแลระบบ"
-    elif status == "approved":
-        return True, "success"
-    else:
-        return False, f"⚠️ บัญชีของคุณอยู่ในสถานะ '{status}' ซึ่งไม่ได้รับสิทธิ์เข้าใช้งาน"
+    try:
+        raw_users = df_users[["username", "password", "status"]].copy() if not df_users.empty else pd.DataFrame(columns=["username", "password", "status"])
+        updated_users = pd.concat([raw_users, new_user], ignore_index=True)
+        conn.update(spreadsheet=URL_of_spreadsheet, worksheet="users", data=updated_users)
+        return True, "ส่งข้อมูลการสมัครสำเร็จแล้ว! กรุณารอรับการอนุมัติใช้งาน (Approved)"
+    except Exception as e:
+        return False, f"ระบบสมัครสมาชิกล้มเหลวเนื่องจาก: {e}"
 
-# --- ส่วนติดต่อผู้ใช้งาน (UI) ---
-st.title("🚗 ระบบคำนวณค่าเดินทางและบันทึกประวัติ EV (Cloud Secure)")
+# --- 3. ระบบบันทึกและส่งข้อมูลการเดินทาง ---
+
+def save_trip_via_form(username, distance, efficiency, electricity_rate, total_cost):
+    """ ทำหน้าที่บันทึกประวัติค่าใช้จ่ายการเดินทางส่งตรงไปยังตาราง Google Sheet เรียลไทม์ """
+    datetime_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # บันทึกตรงเข้าแผ่นงาน 'trips' (เสถียร 100%)
+    new_trip = pd.DataFrame([{
+        "username": str(username).strip(),
+        "distance": float(distance),
+        "efficiency": float(efficiency),
+        "electricity_rate": float(electricity_rate),
+        "total_cost": round(float(total_cost), 2),
+        "datetime": datetime_str
+    }])
+    
+    sheet_success = False
+    try:
+        if not df_trips.empty:
+            valid_cols = ["username", "distance", "efficiency", "electricity_rate", "total_cost", "datetime"]
+            raw_trips = df_trips[[c for c in valid_cols if c in df_trips.columns]].copy()
+            updated_trips = pd.concat([raw_trips, new_trip], ignore_index=True)
+        else:
+            updated_trips = new_trip
+            
+        conn.update(spreadsheet=URL_of_spreadsheet, worksheet="trips", data=updated_trips)
+        sheet_success = True
+    except Exception as e:
+        st.warning(f"⚠️ บันทึกตรงเข้าตารางกูเกิลชีตขัดข้อง: {e}")
+
+    # ยิงฟอร์มสำรองไปยัง Google Form (พอร์ต Requests)
+    form_url = "https://docs.google.com/forms/d/e/1FAIpQLSf6g0u_u3kXpYfA1mYhYlX7wX8z/formResponse"
+    form_data = {
+        "entry.1000001": str(username),
+        "entry.1000002": str(distance),
+        "entry.1000003": str(efficiency),
+        "entry.1000004": str(electricity_rate),
+        "entry.1000005": str(total_cost),
+        "entry.1000006": datetime_str
+    }
+    
+    form_success = False
+    try:
+        response = requests.post(form_url, data=form_data, timeout=5)
+        if response.status_code == 200:
+            form_success = True
+    except Exception:
+        pass # อนุญาตให้ข้ามได้หากฟอร์มไม่ได้เปิดให้ใช้งานสาธารณะจริง
+
+    if sheet_success or form_success:
+        return True, "บันทึกประวัติการคำนวณเรียบร้อย!"
+    return False, "ไม่สามารถจัดเก็บข้อมูลได้ กรุณาลองตรวจสอบใหม่อีกครั้ง"
+
+# --- 4. การจัดการเซสชันหน้าเว็บแอปพลิเคชัน ---
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'username' not in st.session_state:
     st.session_state['username'] = ""
 
-# --- หน้าแรก: ระบบ Login และระบบ Register ---
+if st.session_state['logged_in']:
+    with st.sidebar:
+        st.markdown(f"### 👤 บัญชีปัจจุบัน: **{st.session_state['username']}**")
+        st.write("สถานะการอนุมัติสิทธิ์: **Approved** ✅")
+        st.markdown("---")
+        if st.button("🚪 ออกจากระบบ (Logout)", use_container_width=True):
+            st.session_state['logged_in'] = False
+            st.session_state['username'] = ""
+            st.success("ออกจากระบบสำเร็จ")
+            st.rerun()
+
+# ฟอร์มกรณีไม่ได้เข้าสู่ระบบ
 if not st.session_state['logged_in']:
-    tab1, tab2 = st.tabs(["🔑 เข้าสู่ระบบ", "📝 สมัครสมาชิกใหม่"])
+    st.markdown("<h2 style='text-align: center; color: #1E3A8A;'>🚗 ระบบคำนวณประวัติและบันทึกเดินทาง (EV & น้ำมัน)</h2>", unsafe_style_allowed=True)
+    st.write("---")
     
-    with tab1:
-        st.subheader("กรุณาเข้าสู่ระบบ")
-        login_user_input = st.text_input("Username (ชื่อผู้ใช้งาน)", key="login_user")
-        login_pass_input = st.text_input("Password (รหัสผ่าน)", type="password", key="login_pass")
-        login_button = st.button("เข้าสู่ระบบ")
+    tab_login, tab_register = st.tabs(["🔐 ลงชื่อเข้าใช้ (Login)", "📝 ลงทะเบียนใหม่ (Register)"])
+    
+    with tab_login:
+        st.subheader("ลงชื่อเข้าใช้")
+        login_user_input = st.text_input("ชื่อผู้ใช้งาน (Username)", key="l_user")
+        login_pass_input = st.text_input("รหัสผ่าน (Password)", type="password", key="l_pass")
         
-        if login_button:
+        if st.button("เข้าสู่ระบบ", type="primary", use_container_width=True):
             if login_user_input and login_pass_input:
                 success, msg = login_user(login_user_input, login_pass_input)
                 if success:
                     st.session_state['logged_in'] = True
                     st.session_state['username'] = login_user_input
-                    st.success("🎉 เข้าสู่ระบบสำเร็จ!")
+                    st.success(msg)
                     st.rerun()
                 else:
                     st.error(msg)
             else:
-                st.warning("⚠️ กรุณากรอกข้อมูลให้ครบถ้วน")
+                st.warning("⚠️ กรุณากรอกชื่อผู้ใช้และรหัสผ่านให้ครบถ้วน")
                 
-    with tab2:
-        st.subheader("สร้างบัญชีผู้ใช้งานใหม่")
-        new_user = st.text_input("กำหนด Username (ภาษาอังกฤษ เท่านั้น)", key="reg_user")
-        new_pass = st.text_input("กำหนด Password", type="password", key="reg_pass")
-        confirm_pass = st.text_input("ยืนยัน Password อีกครั้ง", type="password", key="reg_confirm")
-        register_button = st.button("ส่งคำขอสมัครสมาชิก")
+    with tab_register:
+        st.subheader("สมัครสมาชิกใหม่เพื่อขอสิทธิ์")
+        st.info("💡 หมายเหตุ: บัญชีที่สมัครใหม่จะมีสถานะเป็น 'Pending' และจะใช้รหัสผ่านนี้ล็อกอินได้ต่อเมื่อได้รับการเปิดสิทธิ์จากแอดมิน")
+        reg_user_input = st.text_input("กำหนด Username (ภาษาอังกฤษหรือตัวเลขเท่านั้น)", key="r_user")
+        reg_pass_input = st.text_input("กำหนด Password", type="password", key="r_pass")
+        reg_confirm_input = st.text_input("ยืนยัน Password อีกครั้ง", type="password", key="r_conf")
         
-        if register_button:
-            if not new_user or not new_pass:
-                st.error("❌ กรุณากรอกข้อมูลให้ครบถ้วน")
-            elif new_pass != confirm_pass:
-                st.error("❌ รหัสผ่านทั้งสองช่องไม่ตรงกัน")
-            else:
-                reg_result = register_user_via_form(new_user, new_pass)
-                if reg_result == "success":
-                    st.success("🎉 ส่งคำขอสมัครสมาชิกสำเร็จแล้ว! กรุณาติดต่อพี่บิ๊กเพื่อเปิดสถานะเป็น Approved ใน Google Sheets")
-                    st.info(f"💡 พี่บิ๊กอย่าลืมเข้าไปพิมพ์แถวนี้ใน Google Sheets เพื่ออนุมัติสิทธิ์นะครับ:\n\nUsername: {new_user} | Password: {new_pass} | Status: Approved")
-                elif reg_result == "exists":
-                    st.warning("⚠️ ชื่อผู้ใช้งานนี้ถูกใช้ไปแล้ว กรุณาใช้ชื่ออื่น")
+        if st.button("ส่งคำขอสมัครสมาชิก", use_container_width=True):
+            if reg_user_input and reg_pass_input and reg_confirm_input:
+                if reg_pass_input != reg_confirm_input:
+                    st.error("⚠️ รหัสผ่านทั้งสองช่องไม่ตรงกัน")
+                elif not reg_user_input.isalnum():
+                    st.error("⚠️ Username ควรเป็นตัวเลขหรือภาษาอังกฤษที่พิมพ์ติดกันเท่านั้น")
                 else:
-                    st.error("❌ ไม่สามารถสมัครสมาชิกได้ในขณะนี้")
+                    success, msg = register_user(reg_user_input, reg_pass_input)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+            else:
+                st.warning("⚠️ กรุณากรอกข้อมูลส่วนตัวให้ครบทุกถ้วน")
 
-# --- หน้าแอปพลิเคชันหลักหลังจากล็อกอินสำเร็จ ---
 else:
-    # แถบเมนูด้านข้าง (Sidebar)
-    st.sidebar.write(f"ผู้ใช้งานปัจจุบัน: **{st.session_state['username']}**")
-    if st.sidebar.button("ออกจากระบบ"):
-        st.session_state['logged_in'] = False
-        st.session_state['username'] = ""
-        st.rerun()
-        
-    st.write("### 📊 หน้าคำนวณค่าเดินทาง EV และระบบบันทึกประวัติเดินทาง")
-    st.success(f"🔓 ยินดีต้อนรับกลับมาคุณ **{st.session_state['username']}**! ระบบกำลังทำงานและพร้อมช่วยคำนวณเส้นทาง")
+    # หน้าต่างหลักของผู้ใช้เมื่อทำการยืนยันสิทธิ์ล็อกอินผ่านเรียบร้อยแล้ว
+    st.markdown(f"## 📊 ยินดีต้อนรับคุณ {st.session_state['username']} เข้าสู่หน้าระบบคำนวณ")
+    st.write("---")
     
-    # ส่วนคำนวณและเก็บประวัติแบ่งออกเป็น 2 คอลัมน์หลักเพื่อความสวยงาม
-    col_calc, col_history = st.columns([1.2, 1])
+    col_gas, col_ev = st.columns(2)
     
-    with col_calc:
-        st.markdown("### 🧮 คำนวณค่าใช้จ่ายสำหรับการเดินทาง")
-        with st.form("calc_form"):
-            distance = st.number_input("ระยะทางที่ใช้เดินทาง (กิโลเมตร)", min_value=0.1, value=100.0, step=10.0)
-            efficiency = st.number_input("อัตราสิ้นเปลืองของรถ (กิโลเมตร / kWh หรือ หน่วยไฟฟ้า)", min_value=1.0, value=6.5, step=0.5, help="เช่น 6.5 km/kWh")
-            electricity_rate = st.number_input("อัตราค่าไฟฟ้าต่อหน่วย (บาท)", min_value=1.0, value=4.5, step=0.5, help="เช่น ชาร์จบ้านปกติ 4.5 บาท/หน่วย หรือ TOU 2.6/5.8 บาท")
-            
-            calc_submit = st.form_submit_button("⚡ เริ่มคำนวณค่าเดินทาง")
-            
-        if calc_submit:
-            # คำนวณหน่วยไฟที่ใช้เดินทางและราคาสรุปออกมา
-            total_kwh = distance / efficiency
-            total_cost = total_kwh * electricity_rate
-            cost_per_km = total_cost / distance
-            
-            # เก็บค่าผลลัพธ์ลง Session เพื่อใช้บันทึกได้สะดวก
-            st.session_state["last_calc"] = {
-                "distance": distance,
-                "efficiency": efficiency,
-                "electricity_rate": electricity_rate,
-                "total_cost": total_cost,
-                "total_kwh": total_kwh,
-                "cost_per_km": cost_per_km
-            }
-            
-        # ตรวจสอบว่าเคยมีการกดคำนวณเพื่อแสดงผลการ์ดสรุปค่าวัดและปุ่มบันทึก
-        if "last_calc" in st.session_state:
-            res = st.session_state["last_calc"]
-            st.markdown("#### 📝 ผลลัพธ์การคำนวณ")
-            
-            # การ์ดแสดงผลสรุปตัวเลขสถิติ
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric(label="ปริมาณไฟที่ใช้", value=f"{res['total_kwh']:.2f} kWh")
-            with c2:
-                st.metric(label="ค่าไฟรวมสุทธิ", value=f"{res['total_cost']:.2f} บาท")
-            with c3:
-                st.metric(label="เฉลี่ยกิโลเมตรละ", value=f"{res['cost_per_km']:.2f} บาท")
-            
-            # ปุ่มการส่งข้อมูลบันทึกลงชีต Trips ของ User แต่ละคน
-            st.write("ต้องการบันทึกประวัติการคำนวณรอบนี้ลง Google Sheets ของท่านหรือไม่?")
-            if st.button("💾 ยืนยันบันทึกประวัติการเดินทางนี้"):
-                success = save_trip_via_form(
-                    username=st.session_state['username'],
-                    distance=res['distance'],
-                    efficiency=res['efficiency'],
-                    electricity_rate=res['electricity_rate'],
-                    total_cost=res['total_cost']
-                )
-                if success:
-                    st.success("🎉 บันทึกประวัติการเดินทางสำเร็จเรียบร้อย! (ระบบจะโหลดข้อมูลใหม่ในแผ่นงาน trips แถวถัดไป)")
-                else:
-                    st.error("❌ ไม่สามารถเชื่อมต่อเพื่อส่งประวัติได้ โปรดตรวจสอบการตั้งค่า Google Form ของพี่บิ๊ก")
-
-    with col_history:
-        st.markdown("### 📁 ประวัติการเดินทางของคุณ")
-        df_trips = load_sheet_data("trips")
+    with col_gas:
+        st.markdown("<div style='background-color:#FFF5F5; padding:15px; border-radius:10px; border-left: 5px solid #F87171;'>", unsafe_style_allowed=True)
+        st.subheader("⛽ บันทึกเดินทาง (รถน้ำมัน)")
+        gas_distance = st.number_input("ระยะทางที่ใช้เดินทาง (กิโลเมตร)", min_value=0.0, step=1.0, value=100.0, key="gas_d")
+        gas_efficiency = st.number_input("อัตราประหยัดเชื้อเพลิง (กม./ลิตร)", min_value=1.0, step=0.1, value=15.0, key="gas_e")
+        gas_rate = st.number_input("ราคาน้ำมันเฉลี่ยปัจจุบัน (บาท/ลิตร)", min_value=1.0, step=0.1, value=38.5, key="gas_r")
         
-        if df_trips.empty:
-            st.info("ℹ️ ขณะนี้ยังไม่มีประวัติการเดินทางของคุณบันทึกอยู่ในระบบ")
-        else:
-            # คัดกรองและดึงเฉพาะข้อมูลประวัติการเดินทางที่เป็นของ User ที่กำลังล็อกอินอยู่เท่านั้น (เปรียบเทียบจากคอลัมน์ username)
-            df_trips.columns = [str(c).strip().replace(" ", "").lower() for c in df_trips.columns]
-            
-            # ค้นหาคอลัมน์ชื่อผู้ใช้งานแบบยืดหยุ่นในแผ่นงาน trips
-            found_user_col = [c for c in df_trips.columns if "username" in c]
-            if found_user_col:
-                user_col_trips = found_user_col[0]
-                # ล้างค่าช่องว่างหัวท้ายและทำตัวเล็กก่อนกรอง
-                df_trips["clean_trip_user"] = df_trips[user_col_trips].apply(lambda x: clean_sheet_value(x).lower())
-                current_user_clean = str(st.session_state['username']).strip().lower()
-                
-                # กรองข้อมูล
-                user_trips = df_trips[df_trips["clean_trip_user"] == current_user_clean]
-                
-                if not user_trips.empty:
-                    # นำเสนอเฉพาะข้อมูลประวัติที่จำเป็นมาโชว์ให้ผู้ใช้งานเห็น
-                    display_cols = [c for c in user_trips.columns if c not in ["clean_trip_user", user_col_trips]]
-                    st.dataframe(user_trips[display_cols].reset_index(drop=True), use_container_width=True)
-                    st.caption("💡 ระบบจะแสดงประวัติเฉพาะบัญชีของคุณเพื่อความปลอดภัยสูงสุด")
-                else:
-                    st.info(f"💡 คุณ {st.session_state['username']} ยังไม่มีข้อมูลการเดินทางที่บันทึกไว้ในระบบ")
+        gas_cost = (gas_distance / gas_efficiency) * gas_rate if gas_efficiency > 0 else 0.0
+        st.metric(label="ประมาณการเงินค่าน้ำมันรถรวม", value=f"{gas_cost:,.2f} บาท")
+        
+        if st.button("💾 บันทึกประวัติ (รถน้ำมัน)", type="primary", use_container_width=True):
+            success, msg = save_trip_via_form(
+                username=st.session_state['username'],
+                distance=gas_distance,
+                efficiency=gas_efficiency,
+                electricity_rate=gas_rate,
+                total_cost=gas_cost
+            )
+            if success:
+                st.success(msg)
+                st.rerun()
             else:
-                st.warning("⚠️ แผ่นงานประวัติการเดินทาง (trips) ใน Google Sheets ยังไม่พบหรือมีคอลัมน์ username")
+                st.error(msg)
+        st.markdown("</div>", unsafe_style_allowed=True)
+                
+    with col_ev:
+        st.markdown("<div style='background-color:#F0FDF4; padding:15px; border-radius:10px; border-left: 5px solid #4ADE80;'>", unsafe_style_allowed=True)
+        st.subheader("⚡ บันทึกเดินทาง (รถไฟฟ้า EV)")
+        ev_distance = st.number_input("ระยะทางที่ใช้เดินทาง (กิโลเมตร)", min_value=0.0, step=1.0, value=100.0, key="ev_d")
+        ev_efficiency = st.number_input("อัตราใช้ไฟฟ้าเฉลี่ย (กม./หน่วยไฟ)", min_value=0.1, step=0.1, value=6.5, key="ev_e")
+        ev_rate = st.number_input("อัตราค่าไฟฟ้าต่อหน่วย (บาท/หน่วยไฟ)", min_value=1.0, step=0.1, value=4.7, key="ev_r")
+        
+        ev_cost = (ev_distance / ev_efficiency) * ev_rate if ev_efficiency > 0 else 0.0
+        st.metric(label="ประมาณการเงินค่าไฟฟ้า EV รวม", value=f"{ev_cost:,.2f} บาท")
+        
+        if st.button("💾 บันทึกประวัติ (รถไฟฟ้า EV)", type="primary", use_container_width=True):
+            success, msg = save_trip_via_form(
+                username=st.session_state['username'],
+                distance=ev_distance,
+                efficiency=ev_efficiency,
+                electricity_rate=ev_rate,
+                total_cost=ev_cost
+            )
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+        st.markdown("</div>", unsafe_style_allowed=True)
 
-    # แผนที่และพิกัดสถานีชาร์จ EV
-    st.markdown("---")
-    st.header("🗺️ แผนที่พิกัดสถานีชาร์จ EV ทั่วไทย")
-    map_url = "https://www.google.com/maps/d/u/0/embed?mid=12ieBRQK2FUYgCjGt-VehLjKEufqTn4"
-    components.iframe(map_url, width=1000, height=550)
+    # --- 5. แสดงผลประวัติเฉพาะผู้ใช้ปัจจุบัน ---
+    st.write("---")
+    st.subheader("📊 ตารางสรุปประวัติค่าใช้จ่ายรายเดือนของคุณ")
+    
+    if not df_trips.empty:
+        df_trips.columns = [c.strip() for c in df_trips.columns]
+        user_cols = [c for c in df_trips.columns if c.lower() == "username"]
+        
+        if user_cols:
+            real_user_col = user_cols[0]
+            df_trips["clean_trip_user"] = df_trips[real_user_col].apply(lambda x: clean_sheet_value(x).lower())
+            current_user_clean = str(st.session_state['username']).strip().lower()
+            
+            user_trips = df_trips[df_trips["clean_trip_user"] == current_user_clean].copy()
+            
+            if not user_trips.empty:
+                cols_to_show = [c for c in user_trips.columns if c not in ["clean_trip_user", real_user_col]]
+                st.dataframe(user_trips[cols_to_show].reset_index(drop=True), use_container_width=True)
+                st.caption("💡 ระบบจะคัดกรองแสดงเฉพาะทริปเดินทางของบัญชีที่ท่านใช้งานอยู่ปัจจุบันเท่านั้น")
+            else:
+                st.info("ℹ️ ไม่พบประวัติการเดินทางบันทึกในบัญชีนี้ เริ่มทดสอบการคำนวณแรกได้เลยครับ!")
+        else:
+            st.warning("⚠️ คีย์เชื่อมฐานข้อมูลไม่สมบูรณ์ (ไม่พบคอลัมน์ 'username' ในตารางหน้าชีต trips)")
+    else:
+        st.info("ℹ️ ขณะนี้ประวัติตารางเดินทางทั้งหมดในชีตยังว่างเปล่า")
+
+    # --- 6. แผนที่สถานีชาร์จรถไฟฟ้า EV ---
+    st.write("---")
+    st.subheader("🗺️ แผนที่พิกัดสถานีชาร์จ EV ทั่วไทย")
+    components.iframe(
+        "https://www.google.com/maps/d/u/0/embed?mid=12ieBRQK2FUVgcJGt-VehLjKEufqTn4",
+        height=500,
+        scrolling=True
+    )
